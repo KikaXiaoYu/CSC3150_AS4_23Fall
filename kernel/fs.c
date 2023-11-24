@@ -392,20 +392,20 @@ bmap(struct inode *ip, uint bn)
     uint addr, *a;
     struct buf *bp;
 
-    if (bn < NDIRECT)
+    if (bn < NDIRECT) // 1st level
     {
         if ((addr = ip->addrs[bn]) == 0)
         {
-            addr = balloc(ip->dev);
+            addr = balloc(ip->dev); // allocate a block
             if (addr == 0)
                 return 0;
-            ip->addrs[bn] = addr;
+            ip->addrs[bn] = addr; // record address
         }
         return addr;
     }
-    bn -= NDIRECT;
+    bn -= NDIRECT; // start with 2nd level
 
-    if (bn < NINDIRECT)
+    if (bn < NINDIRECT) // 2nd level
     {
         // Load indirect block, allocating if necessary.
         if ((addr = ip->addrs[NDIRECT]) == 0)
@@ -429,6 +429,48 @@ bmap(struct inode *ip, uint bn)
         brelse(bp);
         return addr;
     }
+    bn -= NINDIRECT; // start with 3rd level
+
+    if (bn < DNINDIRECT) // 3rd level
+    {
+        // Load indirect block, allocating if necessary.
+        if ((addr = ip->addrs[NDIRECT + 1]) == 0)
+        {
+            addr = balloc(ip->dev);
+            if (addr == 0)
+                return 0;
+            ip->addrs[NDIRECT + 1] = addr;
+        }
+        bp = bread(ip->dev, addr);
+        a = (uint *)bp->data;
+        uint new_block_num = bn / NINDIRECT;
+        if ((addr = a[new_block_num]) == 0)
+        {
+            addr = balloc(ip->dev);
+            if (addr)
+            {
+                a[new_block_num] = addr;
+                log_write(bp);
+            }
+        }
+        brelse(bp);
+
+        bp = bread(ip->dev, addr);
+        a = (uint *)bp->data;
+        bn -= new_block_num * NINDIRECT;
+
+        if ((addr = a[bn]) == 0)
+        {
+            addr = balloc(ip->dev);
+            if (addr)
+            {
+                a[bn] = addr;
+                log_write(bp);
+            }
+        }
+        brelse(bp);
+        return addr;
+    }
 
     panic("bmap: out of range");
 }
@@ -439,9 +481,10 @@ bmap(struct inode *ip, uint bn)
 // TODO: implement doubly-indirect
 void itrunc(struct inode *ip)
 {
-    int i, j;
+    int i, j, k;
     struct buf *bp;
-    uint *a;
+    struct buf *dbp;
+    uint *a, *da;
 
     for (i = 0; i < NDIRECT; i++)
     {
@@ -464,6 +507,28 @@ void itrunc(struct inode *ip)
         brelse(bp);
         bfree(ip->dev, ip->addrs[NDIRECT]);
         ip->addrs[NDIRECT] = 0;
+    }
+
+    if (ip->addrs[NDIRECT + 1])
+    {
+        bp = bread(ip->dev, ip->addrs[NDIRECT + 1]);
+        a = (uint *)bp->data;
+        for (j = 0; i < NINDIRECT; i++)
+        {
+            dbp = bread(ip->dev, a[j]);
+            da = (uint *)dbp->data;
+            for (k = 0; k < NINDIRECT; k++)
+            {
+                if (da[k])
+                    bfree(ip->dev, da[k]);
+            }
+            brelse(dbp);
+            bfree(ip->dev, a[j]);
+            a[j] = 0;
+        }
+        brelse(bp);
+        bfree(ip->dev, ip->addrs[NDIRECT + 1]);
+        ip->addrs[NDIRECT + 1] = 0;
     }
 
     ip->size = 0;
