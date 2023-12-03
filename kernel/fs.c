@@ -481,10 +481,13 @@ bmap(struct inode *ip, uint bn)
 // TODO: implement doubly-indirect
 void itrunc(struct inode *ip)
 {
-    int i, j, k;
+    int i;
+    int j;
+    int k;
     struct buf *bp;
     struct buf *dbp;
-    uint *a, *da;
+    uint *a;
+    uint *da;
 
     for (i = 0; i < NDIRECT; i++)
     {
