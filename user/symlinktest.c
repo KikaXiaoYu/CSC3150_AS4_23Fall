@@ -77,6 +77,7 @@ testsymlink(void)
     if (r < 0)
         fail("symlink b -> a failed");
 
+
     if (write(fd1, buf, sizeof(buf)) != 4)
         fail("failed to write to a");
     if (stat_slink("/testsymlink/b", &st) != 0)
@@ -84,24 +85,33 @@ testsymlink(void)
     if (st.type != T_SYMLINK)
         fail("b isn't a symlink");
 
+
     fd2 = open("/testsymlink/b", O_RDWR);
     if (fd2 < 0)
         fail("failed to open b");
+
+
     read(fd2, &c, 1);
     if (c != 'a')
         fail("failed to read bytes from b");
 
+
     unlink("/testsymlink/a");
+
+
     if (open("/testsymlink/b", O_RDWR) >= 0)
         fail("Should not be able to open b after deleting a");
+
 
     r = symlink("/testsymlink/b", "/testsymlink/a");
     if (r < 0)
         fail("symlink a -> b failed");
 
+
     r = open("/testsymlink/b", O_RDWR);
     if (r >= 0)
         fail("Should not be able to open b (cycle b->a->b->..)\n");
+
 
     r = symlink("/testsymlink/nonexistent", "/testsymlink/c");
     if (r != 0)
@@ -116,6 +126,7 @@ testsymlink(void)
     r = symlink("/testsymlink/4", "/testsymlink/3");
     if (r)
         fail("Failed to link 3->4");
+
 
     close(fd1);
     close(fd2);
@@ -160,6 +171,7 @@ concur(void)
         exit(1);
     }
     close(fd);
+
 
     for (int j = 0; j < nchild; j++)
     {

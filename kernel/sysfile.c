@@ -333,6 +333,7 @@ sys_open(void)
 
     if (omode & O_CREATE)
     {
+
         ip = create(path, T_FILE, 0, 0);
         if (ip == 0)
         {
@@ -347,6 +348,7 @@ sys_open(void)
             end_op();
             return -1;
         }
+
         ilock(ip);
         if (ip->type == T_DIR && omode != O_RDONLY)
         {
@@ -358,6 +360,41 @@ sys_open(void)
     // (BONUS) TODO:
     if (ip->type == T_SYMLINK && (omode & O_NOFOLLOW) == 0)
     {
+        char target[MAXPATH]; // save new address
+        struct inode *ip2;    // save the next inode
+        int max_depth = 10;
+        int depth_count = 0;
+        // printf("[SHINO] Before the while\n");
+        // ilock(ip);
+        while (ip->type == T_SYMLINK && depth_count < max_depth)
+        {
+            /* fresh the target for next usage */
+            memset(target, 0, MAXPATH);
+            /* read the linking path */
+            readi(ip, 0, (uint64)target, 0, MAXPATH);
+            /* get the corresponding inode */
+            ip2 = namei(target);
+            // ilock(ip2);
+            if (ip2 == 0)
+            {
+                // printf("[SHINO] Not found!\n");
+                iunlockput(ip);
+                end_op();
+                return -1;
+            }
+            iunlockput(ip);
+            ip = ip2;
+            // iunlockput(ip2);
+            ilock(ip);
+            depth_count++;
+        }
+        if (depth_count == max_depth)
+        {
+            // printf("[SHINO] Too deep!\n");
+            end_op();
+            return -1;
+        }
+        memmove(path, target, MAXPATH);
     }
 
     if (ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV))
@@ -550,31 +587,101 @@ sys_pipe(void)
 uint64
 sys_symlink(void)
 {
-    char target[MAXPATH], path[MAXPATH];
+    /* arguments */
+    char target[MAXPATH];
+    char path[MAXPATH];
+
     struct inode *ip;
-    int n;
+    // struct inode *dp;
 
-    if ((n = argstr(0, target, MAXPATH)) < 0 || argstr(1, path, MAXPATH) < 0)
-    {
-        return -1;
-    }
+    /* fetch arguments */
+    argstr(0, target, MAXPATH);
+    argstr(1, path, MAXPATH);
 
+    /* starting the task */
     begin_op();
-    // create the symlink's inode
-    if ((ip = create(path, T_SYMLINK, 0, 0)) == 0)
+    /* different from link, we create new inode */
+    // printf("[SHINO] create new inode with pid \n");
+    if ((ip = namei(path)) != 0)
     {
         end_op();
         return -1;
     }
-    // write the target path to the inode
-    if (writei(ip, 0, (uint64)target, 0, MAXPATH) != MAXPATH)
+
+    ip = create(path, T_SYMLINK, 0, 0);
+    ip->nlink += 1;
+    if (ip == 0)
+    {
+        goto bad;
+    }
+    // printf("[SHINO] ip->nlink %d\n", ip->nlink);
+    /* write the address to the new inode */
+    writei(ip, 0, (uint64)target, 0, MAXPATH);
+    // printf("[SHINO] writei done\n");
+
+    /* unlock inode from the buffer and release its memory space， consistent with ilock in create func */
+    iunlockput(ip);
+    end_op();
+    return 0;
+
+bad:
+    ip->nlink--;
+    end_op();
+    return -1;
+}
+
+/*
+
+
+// Create the path new as a link to the same inode as old.
+uint64
+sys_link(void)
+{
+    char name[DIRSIZ], new[MAXPATH], old[MAXPATH];
+    struct inode *dp, *ip;
+
+    if (argstr(0, old, MAXPATH) < 0 || argstr(1, new, MAXPATH) < 0)
+        return -1;
+
+    begin_op();
+    if ((ip = namei(old)) == 0)
+    {
+        end_op();
+        return -1;
+    }
+
+    ilock(ip);
+    if (ip->type == T_DIR)
     {
         iunlockput(ip);
         end_op();
         return -1;
     }
 
+    ip->nlink++;
+    iupdate(ip);
+    iunlock(ip);
+
+    if ((dp = nameiparent(new, name)) == 0)
+        goto bad;
+    ilock(dp);
+    if (dp->dev != ip->dev || dirlink(dp, name, ip->inum) < 0)
+    {
+        iunlockput(dp);
+        goto bad;
+    }
+    iunlockput(dp);
+    iput(ip);
+
+    end_op();
+
+    return 0;
+
+bad:
+    ilock(ip);
+    ip->nlink--;
+    iupdate(ip);
     iunlockput(ip);
     end_op();
-    return 0;
-}
+    return -1;
+}*/
